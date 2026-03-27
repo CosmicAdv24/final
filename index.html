@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Cosmic Adventure - Play Store Edition</title>
+<link rel="manifest" href="manifest.json" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+
+:root {
+  --sky: #1a0533; --accent: #ff6b35; --yellow: #ffd700; --teal: #00e5c8;
+  --pink: #ff4fa3; --green: #4cff72; --blue: #4fa3ff; --purple: #b44fff;
+  --card-bg: rgba(255,255,255,0.08); --card-border: rgba(255,255,255,0.15);
+  --safe-top: env(safe-area-inset-top, 20px);
+}
+
+html, body { width: 100%; height: 100%; background: var(--sky); font-family: 'Nunito', sans-serif; overflow: hidden; color: #fff; }
+
+#hud {
+  position: absolute; top: var(--safe-top); left: 0; width: 100%;
+  padding: 10px 20px; display: none; justify-content: space-between;
+  align-items: center; z-index: 100; pointer-events: auto;
+}
+
+#hud.active { display: flex; }
+
+.score-val { font-family: 'Fredoka One', cursive; font-size: 2.2rem; text-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+
+canvas { display: none; width: 100%; height: 100%; background: transparent; touch-action: none; }
+canvas.active { display: block; }
+
+.screen, .overlay {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  display: none; flex-direction: column; align-items: center;
+  justify-content: center; text-align: center; padding: 20px; z-index: 10;
+}
+
+.screen.active, .overlay.active { display: flex; }
+
+.overlay { background: rgba(0,0,0,0.85); z-index: 500; backdrop-filter: blur(8px); }
+
+.home-title {
+  font-family: 'Fredoka One', cursive; font-size: 3.2rem; margin-bottom: 20px;
+  background: linear-gradient(#fff, #aaa); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+
+.card-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 15px;
+  width: 100%; max-width: 450px;
+}
+
+.mode-card {
+  background: var(--card-bg); border: 1px solid var(--card-border);
+  border-radius: 20px; padding: 20px; cursor: pointer; transition: 0.2s;
+}
+
+.mode-card:active { transform: scale(0.95); background: rgba(255,255,255,0.15); }
+
+.btn {
+  padding: 15px 30px; border-radius: 50px; border: none;
+  font-family: 'Fredoka One'; font-size: 1.2rem; cursor: pointer;
+  color: #fff; margin: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  pointer-events: auto;
+}
+
+.btn-accent { background: linear-gradient(135deg, var(--accent), #ff8c35); }
+
+#ad-banner {
+  position: absolute; bottom: 0; width: 100%; height: 50px;
+  background: #000; display: flex; align-items: center;
+  justify-content: center; font-size: 10px; color: #444; z-index: 1000;
+}
+</style>
+</head>
+
+<body>
+<div id="root">
+
+  <div id="hud">
+    <div>
+      <span style="font-size:0.8rem; opacity:0.7;">SCORE</span><br>
+      <span id="score-text" class="score-val">0</span>
+    </div>
+    <button class="btn" style="padding:10px; background:rgba(255,255,255,0.1);" onclick="pauseGame()">⏸️</button>
+  </div>
+
+  <div id="home-scr" class="screen active">
+    <h1 class="home-title">COSMIC<br>ADVENTURE</h1>
+
+    <div class="card-grid">
+      <div class="mode-card" onclick="startGame('runner')"><div style="font-size:2.5rem">🚀</div>Runner</div>
+      <div class="mode-card" onclick="startGame('bubble')"><div style="font-size:2.5rem">🫧</div>Ocean Pop</div>
+      <div class="mode-card" onclick="startGame('catch')"><div style="font-size:2.5rem">🍬</div>Candy Catch</div>
+      <div class="mode-card" onclick="startGame('maze')"><div style="font-size:2.5rem">🐸</div>Jungle Maze</div>
+    </div>
+
+    <button class="btn btn-accent" style="margin-top:20px;" onclick="PlayServices.showLeaderboard()">🏆 LEADERBOARDS</button>
+  </div>
+
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="gameover-ov" class="overlay">
+    <h2 style="font-family:'Fredoka One'; font-size:3.5rem; color:var(--pink);">FINISH!</h2>
+    <div style="font-size:2rem; margin:20px;">Score: <span id="ov-score" style="color:var(--yellow); font-weight:900;">0</span></div>
+    <button class="btn btn-accent" onclick="restartGame()">RETRY</button>
+    <button class="btn" style="background:#555" onclick="goHome()">HOME</button>
+  </div>
+
+  <div id="ad-banner">AD_MOB_BANNER_SPACE</div>
+
+</div>
+
+<script>
+// ----------------------
+// 1. SERVICES
+// ----------------------
+const PlayServices = {
+  init() { console.log("Google Play Services Ready"); },
+  submitScore(mode, s) { console.log(`GPGS: Score ${s} sent to ${mode} leaderboard`); },
+  showLeaderboard() { console.log("Show leaderboard requested"); }
+};
+
+const Ads = {
+  showInterstitial() {
+    let count = parseInt(localStorage.getItem('gamesPlayed') || '0') + 1;
+    localStorage.setItem('gamesPlayed', count);
+    if (count % 3 === 0) console.log("AdMob: Interstitial logic triggered");
+  }
+};
+
+// ----------------------
+// 2. AUDIO (TEMP DISABLED)
+// ----------------------
+const sfx = {
+  collect: { play(){} },
+  hit: { play(){} },
+  pop: { play(){} }
+};
+
+// ----------------------
+// 3. GAME ENGINE
+// ----------------------
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let W, H, mode, gameRunning = false, score = 0, animId = null, activeTimeouts = [], paused = false;
+
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W;
+  canvas.height = H;
+  ctx.font = '20px "Nunito", sans-serif';
+  ctx.fillStyle = '#fff';
+  ctx.textBaseline = 'top';
+}
+window.addEventListener('resize', resize);
+resize();
+
+function safeTimeout(fn, delay) {
+  const id = setTimeout(() => {
+    if (gameRunning && !paused) fn();
+  }, delay);
+  activeTimeouts.push(id);
+  return id;
+}
+
+function clearGameTimeouts() {
+  activeTimeouts.forEach(id => clearTimeout(id));
+  activeTimeouts = [];
+}
+
+function updateScore(pts) {
+  score += pts;
+  document.getElementById('score-text').textContent = score;
+}
+
+function startGame(m) {
+  clearGameTimeouts();
+  mode = m;
+  score = 0;
+  gameRunning = true;
+  paused = false;
+
+  document.getElementById('home-scr').classList.remove('active');
+  document.getElementById('gameover-ov').classList.remove('active');
+  canvas.classList.add('active');
+  document.getElementById('hud').classList.add('active');
+  document.getElementById('score-text').textContent = "0";
+
+  requestAnimationFrame(gameLoop);
+}
+
+function gameLoop() {
+  if (!gameRunning || paused) return;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillText("Current Mode: " + mode, 20, 20);
+
+  animId = requestAnimationFrame(gameLoop);
+}
+
+function endGame() {
+  if (!gameRunning) return;
+  gameRunning = false;
+  clearGameTimeouts();
+
+  Ads.showInterstitial();
+  document.getElementById('ov-score').textContent = score;
+  document.getElementById('gameover-ov').classList.add('active');
+}
+
+function goHome() {
+  gameRunning = false;
+  clearGameTimeouts();
+  if (animId) cancelAnimationFrame(animId);
+
+  canvas.classList.remove('active');
+  document.getElementById('hud').classList.remove('active');
+  document.getElementById('gameover-ov').classList.remove('active');
+  document.getElementById('home-scr').classList.add('active');
+}
+
+function restartGame() { startGame(mode); }
+
+function pauseGame() {
+  paused = !paused;
+  if (paused) {
+    if (animId) cancelAnimationFrame(animId);
+  } else {
+    requestAnimationFrame(gameLoop);
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (animId) cancelAnimationFrame(animId);
+  } else {
+    if (gameRunning && !paused) requestAnimationFrame(gameLoop);
+  }
+});
+
+PlayServices.init();
+</script>
+
+</body>
+</html>
